@@ -1,0 +1,279 @@
+//index.html add script in header
+
+<script src="https://www.google.com/recaptcha/api.js?render=6LdgoIUqAAAAANPSQNdncrDo9dmX5tziDfWGy04N"></script>
+
+//login.ts file 
+import { Component, OnInit } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { GlobalProfileService } from 'src/app/global-profile.service';
+import { AuthService, User, OpenService, LoginRequest } from 'src/swagger';
+import { CommonSupportService } from 'src/app/common-support.service';
+declare var swal: any;
+
+@Component({
+  selector: 'app-login',
+  templateUrl: './login.component.html',
+  styleUrls: ['./login.component.css']
+})
+export class LoginComponent implements OnInit {
+
+  public emailId: string;
+  public password: string;
+  public error: string;
+  captchSiteKey = '6LdgoIUqAAAAANPSQNdncrDo9dmX5tziDfWGy04N';
+  public loginDetails: LoginRequest = {}
+  token: string;
+
+  constructor(
+    private activatedRoute: ActivatedRoute,
+    public profileSync: GlobalProfileService,
+    private authApi: AuthService,
+    public router: Router,
+    public openApi: OpenService,
+    private commonService: CommonSupportService
+
+  ) { }
+
+  ngOnInit() {
+    this.activatedRoute.params.subscribe(params => {
+      if (params && params.token) {
+        this.verifyUser(params.token);
+      }
+    });
+  }
+
+  public Login() {
+
+    let redirectTo;
+
+    if (this.activatedRoute.snapshot.queryParams.hasOwnProperty('redirectTo')) {
+      redirectTo = this.activatedRoute.snapshot.queryParams.redirectTo;
+    } else {
+      redirectTo = null;
+    }
+
+    if (this.loginDetails) {
+      this.error = null;
+      const that = this;
+      swal({
+        title: 'Logging you in',
+        html: '<i class="fa fa-circle-check fa-spin"></i>',
+        type: 'info',
+        showConfirmButton: false,
+        showCancelButton: false,
+      });
+
+      this.profileSync.updateUserProfile(null);
+      this.profileSync.updateLoggedInStatus(false);
+      grecaptcha.ready(() => {
+        grecaptcha.execute(this.captchSiteKey, { action: 'login' }).then((token: string) => {
+          this.token = token;
+          return new Promise((resolve, reject) => {
+            console.log(this.token);
+            //debugger
+            that.openApi.login(this.loginDetails, this.token).subscribe(user => {
+              // remove this code while go live on UAT, QA and PROD
+              localStorage.setItem("USERINFO", JSON.stringify(user['result']));
+              resolve(user);
+            }, err => {
+              console.log(err);
+              reject(err);
+            });
+          }).then((user: User) => {
+            user = user['result'];
+            this.profileSync.setToken(user['access_token']);
+            swal.close();
+            const that = this;
+            that.openApi.credlixProfile().subscribe(user => {
+              if (user && user['result'] != null) {
+                this.profileSync.updateUserProfile(user['result']);
+                user = user['result'];
+                // localStorage.setItem("ADMININFO", JSON.stringify(user));
+                let name = user.loggedInUserRole.role.name;
+                let roleType = user.loggedInUserRole.roleType
+                if ((name == User.RoleEnum.COMPANY_ADMIN.toString() || name == User.RoleEnum.MAKER_ADMIN.toString() || name == User.RoleEnum.CHECKER_ADMIN.toString() || name == User.RoleEnum.VIEW_ADMIN.toString() || name == User.RoleEnum.SALESVIEW.toString()) && roleType == "EXIM") {
+                  that.router.navigate(['/admin']);
+                } else if (name == User.RoleEnum.VIEW_ADMIN.toString() && roleType == 'EXIM') {
+                  that.router.navigate(['/view-admin']);
+                } else if ((name == User.RoleEnum.COMPANY_ADMIN.toString() || name == User.RoleEnum.MAKER_ADMIN.toString()) && roleType == "BORROWER") {
+                  that.router.navigate(['/exporter']);
+                } else if (name == User.RoleEnum.FRESH_SUPPLIER.toString() && roleType == "CREDLIX") {
+                  let id = user.userOnboardId;
+                  that.router.navigate(['/supplier-new-dashboard', id]);//change for supplier on board
+                }
+                else {
+                  that.router.navigate(['/login']);
+                }
+              } else {
+                console.log('Failed to get user profile');
+              }
+            });
+
+          }).catch(err => {
+            swal.close();
+            this.error = err.error ? err.error.message : err;
+          });
+        });
+      });
+    }
+  }
+  verifyUser(token) {
+    this.openApi.verifyUser(token).subscribe(ok => {
+      if (ok) {
+        this.commonService.showSuccessSwal('Verified', ok.message);
+      }
+    }, err => {
+      this.commonService.showErrorSwal(err);
+      console.log(err);
+    });
+  }
+}
+
+
+
+
+
+
+
+
+//open.service.ts 
+modify only --> login() method 
+
+ public login(
+    LoginRequest: LoginRequest,
+    captchaToken: any,
+    observe?: "body",
+    reportProgress?: boolean
+  ): Observable<User>;
+  public login(
+    LoginRequest: LoginRequest,
+    captchaToken: any,
+    observe?: "response",
+    reportProgress?: boolean
+  ): Observable<HttpResponse<User>>;
+  public login(
+    LoginRequest: LoginRequest,
+    captchaToken: any,
+    observe?: "events",
+    reportProgress?: boolean
+  ): Observable<HttpEvent<User>>;
+  public login(
+    LoginRequest: LoginRequest,
+    captchaToken: any,
+    observe: any = "body",
+    reportProgress: boolean = false
+  ): Observable<any> {
+    if (LoginRequest === null || LoginRequest === undefined) {
+      throw new Error(
+        "Required parameter LoginRequest was null or undefined when calling login."
+      );
+    }
+
+    let headers = this.defaultHeaders;
+    // to determine the Accept header
+    let httpHeaderAccepts: string[] = ["application/json"];
+    const httpHeaderAcceptSelected: string | undefined =
+      this.configuration.selectHeaderAccept(httpHeaderAccepts);
+    if (httpHeaderAcceptSelected != undefined) {
+      headers = headers.set("Accept", httpHeaderAcceptSelected);
+    }
+
+    // to determine the Content-Type header
+    const consumes: string[] = ["application/json"];
+    const httpContentTypeSelected: string | undefined =
+      this.configuration.selectHeaderContentType(consumes);
+    if (httpContentTypeSelected != undefined) {
+      headers = headers.set("Content-Type", httpContentTypeSelected);
+    }
+    if(captchaToken){
+      headers = headers.set("g-recaptcha-response", captchaToken.toString());
+    }
+    console.log(captchaToken);
+    console.log(headers);
+    return this.httpClient.post<User>(
+      this.env + `/users/signin`,
+      LoginRequest,
+      {
+        withCredentials: this.configuration.withCredentials,
+        headers: headers,
+        observe: observe,
+        reportProgress: reportProgress,
+      }
+    );
+  }
+
+   //html code 
+<div class="login">
+  <div class="container-fluid h-100">
+    <div class="row h-100 align-items-center justify-content-center">
+      <div class="col-md-12 col-xl-10">
+        <div class="login-card">
+          <div class="row">
+            <div class="col-md-7 p-0">
+              <div class="card login-leftside">
+                <img src="/assets/nuphi-logo.svg">
+                <h1>Login</h1>
+                <div *ngIf="this.error" class="alert alert-danger" role="alert">
+                  <strong>{{this.error}}</strong>
+                </div>
+                <form ngNativeValidate autocomplete="off" (ngSubmit)="Login()" #loginForm="ngForm">
+                  <div class="form-group">
+                    <label for="">Email id</label>
+                    <div class="input-group">
+                      <div class="input-group-prepend"><i class="fa fa-user input-group-text"></i></div><!-- prepend -->
+                      <input type="email" [(ngModel)]="this.loginDetails.email" class="form-control" name="email"
+                        id="email">
+                    </div><!-- input-group -->
+                  </div><!-- group -->
+                  <div class="form-group mb-5">
+                    <label for="">Password</label>
+                    <div class="input-group">
+                      <div class="input-group-prepend"><i class="fa fa-lock input-group-text"></i></div>
+                      <!-- prepend -->
+                      <input type="password" [(ngModel)]="this.loginDetails.password" class="form-control"
+                        name="password" id="password">
+                    </div><!-- input-group -->
+                  </div><!-- group -->
+                  <div class="row">
+                    <div class="col-md-6">
+                      <button type="submit" class="btn btn-primary">LOGIN<i class="fa fa-door-open ml-3"></i></button>
+                    </div><!-- col-6 -->
+                    <div class="col-md-6 text-right">
+                      <a routerLink="/signup-exporter" class="sig"><i class="fa fa-user mr-2"></i>Sign up now!</a>
+                    </div><!-- col-6 -->
+                  </div><!-- row -->
+                  <div class="row">
+                    <div class="col-md-6">
+                      <div class="mt-4">
+
+                        <a routerLink="/forgot-password" class="form-text text-muted">Forgot password?</a>
+                      </div>
+                    </div><!-- col-6 -->
+                    <!-- <div class="col-md-6 text-md-right">
+  <div class="mt-4"><a routerLink="/signup-agent" class="sig"><i class="fa fa-user mr-2"></i>Sign up
+                            Agent</a></div>
+  </div> -->
+                    <!-- col-6 -->
+                  </div><!-- row -->
+                </form>
+              </div><!-- card -->
+            </div><!-- col-6 -->
+            <div class="col-md-5 p-0 login-bg">
+              <img src="../assets/login_bg.png">
+            </div><!-- col-6 -->
+
+          </div><!-- row -->
+          <div class="text-right copy">POWERED BY <a href="https://blackcurrantapps.com/" target="_blank">BLACKCURRANT
+              APPS</a></div> <!-- right -->
+        </div><!-- login-card -->
+      </div><!-- col -->
+    </div><!-- row -->
+  </div><!-- container -->
+</div>
+
+
+
+
+
+
+
